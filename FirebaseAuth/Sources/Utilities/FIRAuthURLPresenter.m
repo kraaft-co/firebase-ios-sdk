@@ -17,6 +17,7 @@
 #import <TargetConditionals.h>
 #if TARGET_OS_IOS && (!defined(TARGET_OS_VISION) || !TARGET_OS_VISION)
 
+#import <AuthenticationServices/AuthenticationServices.h>
 #import <SafariServices/SafariServices.h>
 #import "FirebaseAuth/Sources/Public/FirebaseAuth/FIRAuthUIDelegate.h"
 
@@ -27,6 +28,15 @@
 #import "FirebaseAuth/Sources/Utilities/FIRAuthWebViewController.h"
 
 NS_ASSUME_NONNULL_BEGIN
+
+@interface FIRPresentationContextProvider : UIViewController <ASWebAuthenticationPresentationContextProviding>
+@end
+
+@implementation FIRPresentationContextProvider
+- (ASPresentationAnchor)presentationAnchorForWebAuthenticationSession:(ASWebAuthenticationSession *)session {
+    return [UIApplication sharedApplication].keyWindow;
+}
+@end
 
 @interface FIRAuthURLPresenter () <SFSafariViewControllerDelegate, FIRAuthWebViewControllerDelegate>
 @end
@@ -64,6 +74,9 @@ NS_ASSUME_NONNULL_BEGIN
    */
   id<FIRAuthUIDelegate> _UIDelegate;
 
+  API_AVAILABLE(ios(13.0))
+  FIRPresentationContextProvider* _presentationContextProvider;
+
   /** @var _completion
       @brief The completion handler for the current presentation, if one is active.
           Accesses to this variable are serialized on the global Auth work queue
@@ -97,7 +110,19 @@ NS_ASSUME_NONNULL_BEGIN
         [[UINavigationController alloc] initWithRootViewController:self->_webViewController];
     [self->_UIDelegate presentViewController:navController animated:YES completion:nil];
 #else
-    if ([SFSafariViewController class]) {
+
+    if (@available(iOS 13.0, *)) {
+      ASWebAuthenticationSession *authenticationVC = [[ASWebAuthenticationSession alloc]
+                                                      initWithURL:URL
+                                                      callbackURLScheme:nil
+                                                      completionHandler:^(NSURL * _Nullable callbackURL, NSError * _Nullable error) {
+        [self finishPresentationWithURL:callbackURL error:error];
+      }];
+      self->_presentationContextProvider = [[FIRPresentationContextProvider alloc] init];
+      authenticationVC.presentationContextProvider = self->_presentationContextProvider;
+      [authenticationVC start];
+    }          
+    else if ([SFSafariViewController class]) {
       self->_safariViewController = [[SFSafariViewController alloc] initWithURL:URL];
       self->_safariViewController.delegate = self;
       [self->_UIDelegate presentViewController:self->_safariViewController
